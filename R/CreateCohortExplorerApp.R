@@ -56,6 +56,25 @@
 #'
 #' @param assignNewId                 (Default = FALSE) Do you want to assign a newId for persons. This will replace the personId in the source with a randomly assigned newId.
 #'
+#' @param userCovariates              (KEEPER: for future: turn recommendations for KEEPER on and off)
+#'
+#' @param PriorDrugs                  KEEPER: input string for concept_ids for prior drug exposures relevant to the condition of interest within a year prior to the index date
+#'
+#' @param PriorConditions             KEEPER: input string for concept_ids for prior conditions relevant to the condition of interest within a year prior to the index date
+#'
+#' @param DiagnosticProcedures        KEEPER: input string for concept_ids for diagnostic procedures relevant to the condition of interest within a month prior and after the index date
+#'
+#' @param Measurements	              KEEPER: input string for concept_ids for lab tests relevant to the condition of interest within a month prior and after the index date
+#'
+#' @param AlternativeDiagnosis        KEEPER: input string for concept_ids for competing diagnosis within a month after the index date
+#'
+#' @param TreatmentProcedures	        KEEPER: input string for concept_ids for treatment procedures relevant to the condition of interest within a month after the index date
+#'
+#' @param MedicationTreatment         KEEPER: input string for concept_ids for treatment medications relevant to the condition of interest within a month after the index date
+#'
+#' @param Complications               KEEPER: input string for concept_ids for complications of the condition of interest within a year after the index date
+#'
+#'
 #' @examples
 #' \dontrun{
 #' connectionDetails <- createConnectionDetails(
@@ -68,7 +87,21 @@
 #'
 #' createCohortExplorerApp(
 #'   connectionDetails = connectionDetails,
-#'   cohortDefinitionId = 1234
+#'   cohortDefinitionId = 1234,
+#'   cohortName = "DM type I",
+#'   PriorConditions = c(201820,442793,443238,4016045,4065354,45757392, 4051114, 433968, 375545, 29555009, 4209145, 4034964, 380834, 4299544, 4226354, 4159742, 43530690, 433736,
+#'                     320128, 4170226, 40443308, 441267, 4163735, 192963, 85828009),
+#'   PriorDrugs = c(1730370, 21604490, 21601682, 21601855, 21601462, 21600280, 21602728, 1366773, 21602689, 21603923, 21603746),
+#'   DiagnosticProcedures = "",
+#'   Measurements	= c(3034962, 3000483, 3034962, 3000483, 3004501, 3033408, 3005131, 3024629, 3031266, 3037110, 3009261, 3022548, 3019210, 3025232, 3033819,
+#'                  3000845, 3002666, 3004077, 3026300, 3014737, 3027198, 3025398, 3010300, 3020399, 3007332, 3025673, 3027457, 3010084, 3004410, 3005673),
+#'   AlternativeDiagnosis = c(201820,442793,443238,4016045,4065354,45757392, 4051114, 433968, 375545, 29555009, 4209145, 4034964, 380834, 4299544, 4226354, 4159742, 43530690, 433736,
+#'                          320128, 4170226, 40443308, 441267, 4163735, 192963, 85828009),
+#'   TreatmentProcedures = c(40756884, 4143852, 2746768, 2746766),
+#'   MedicationTreatment = c(741530, 42873378, 45774489, 1502809,1502826,1503297,1510202, 1515249,1516766,1525215,1529331,1530014,1547504,
+#'                          1559684,1560171,1580747,1583722,1594973,1597756,19067100,1502905,1513876,1516976,1517998,1531601,1544838,1550023, 1567198,19122121,21600713),
+#'   Complications =  c(201820,442793,443238,4016045,4065354,45757392, 4051114, 433968, 375545, 29555009, 4209145, 4034964,
+#'                       380834, 4299544, 4226354, 4159742, 43530690, 433736, 320128, 4170226, 40443308, 441267, 4163735, 192963, 85828009)                             
 #' )
 #' }
 #'
@@ -88,7 +121,17 @@ createCohortExplorerApp <- function(connectionDetails = NULL,
                                     exportFolder,
                                     databaseId,
                                     shiftDates = FALSE,
-                                    assignNewId = FALSE) {
+                                    assignNewId = FALSE ,
+                                    #userCovariates = TRUE,
+                                    PriorDrugs,
+                                    PriorConditions,
+                                    DiagnosticProcedures,
+                                    Measurements,
+                                    AlternativeDiagnosis,
+                                    TreatmentProcedures,
+                                    MedicationTreatment,
+                                    Complications
+                                    ) {
   errorMessage <- checkmate::makeAssertCollection()
 
   checkmate::assertLogical(
@@ -1121,11 +1164,173 @@ createCohortExplorerApp <- function(connectionDetails = NULL,
     data = drugExposure,
     useNewId = assignNewId
   )
-  drugEra <- replaceId(data = drugEra, useNewId = assignNewId)
+  drugEra <- replaceId(data = drugEra, useNewId = assignNewId
+  )
   measurement <- replaceId(
     data = measurement,
     useNewId = assignNewId
   )
+
+# create and save df for KEEPER
+# XXX:later  - add switch, add variable time window, need to add ancestor 
+writeLines("Starting KEEPER.")
+
+presentation = cohort %>%
+  dplyr::inner_join(conditionOccurrence,  by = c("personId", "startDate"))%>%
+  dplyr::inner_join(conceptIds, by = "conceptId")%>%
+  select(personId, conceptName, typeConceptId)%>% distinct()%>%
+  #type concept id
+  dplyr::inner_join(conceptIds, by = c("typeConceptId" = "conceptId"))%>%
+  dplyr::mutate(conceptName = paste(conceptName.x, " (", conceptName.y, ")", sep = ''))%>%
+  dplyr::group_by(personId) %>% 
+  dplyr::summarise(presentation = stringr::str_c(conceptName, collapse = ", ")) 
+
+
+priorConditions = cohort %>%
+  dplyr::inner_join(conditionOccurrence,  by = c("personId"))%>%
+  dplyr::filter(conceptId %in% PriorConditions)%>%
+  # within a year prior
+  dplyr::filter(difftime(startDate.x, startDate.y, units = "days") < 365 & difftime(startDate.x, startDate.y, units = "days") > 0)%>%
+  dplyr::inner_join(conceptIds, by = "conceptId")%>%
+  # sort 
+  dplyr:: arrange(difftime(startDate.y, startDate.x, units = "days"))%>%
+  dplyr::mutate(conceptName = paste(conceptName, " (", difftime(startDate.y, startDate.x, units = "days"), " days)", sep = ''))%>%
+  dplyr::select(personId, conceptName)%>% 
+  dplyr::distinct()%>%
+  dplyr::group_by(personId) %>% 
+  dplyr::summarise(priorConditions = stringr::str_c(conceptName, collapse = ", "))
+    
+
+priorDrugs = cohort %>%
+  dplyr::inner_join(drugEra,  by = c("personId"))%>%
+  dplyr::filter(conceptId %in% PriorDrugs)%>%
+  # within a year prior
+  dplyr::filter(difftime(startDate.x, startDate.y, units = "days") < 366 & difftime(startDate.x, startDate.y, units = "days") > 0)%>%
+  dplyr::inner_join(conceptIds, by = "conceptId")%>%
+  # sort 
+  dplyr:: arrange(difftime(startDate.y, startDate.x, units = "days"))%>%
+  dplyr::mutate(conceptName = paste(conceptName, " (", difftime(startDate.y, startDate.x, units = "days"), " days, for ", difftime(endDate.y, startDate.y, units = "days") , " days)", sep = ''))%>%
+  dplyr::select(personId, conceptName)%>% 
+  dplyr::distinct()%>%
+  dplyr::group_by(personId) %>% 
+  dplyr::summarise(priorDrugs = stringr::str_c(conceptName, collapse = ", "))
+
+
+diagnosticProcedures = cohort %>%
+  dplyr::inner_join(procedureOccurrence,  by = c("personId"))%>%
+  dplyr::filter(conceptId %in% DiagnosticProcedures)%>%
+  # within the next month and a month prior
+  dplyr::filter(difftime(startDate.y, startDate.x, units = "days") < 31 & difftime(startDate.y, startDate.x, units = "days") > -31)%>%
+  dplyr::inner_join(conceptIds, by = "conceptId")%>%
+  # sort 
+  dplyr:: arrange(difftime(startDate.y, startDate.x, units = "days"))%>%
+  dplyr::mutate(conceptName = paste(conceptName, " (", difftime(startDate.y, startDate.x, units = "days"), " days)", sep = ''))%>%
+  dplyr::select(personId, conceptName)%>% 
+  dplyr::distinct()%>%
+  dplyr::group_by(personId) %>% 
+  dplyr::summarise(diagnosticProcedures = stringr::str_c(conceptName, collapse = ", "))  
+
+
+measurements = cohort %>%
+  dplyr::inner_join(measurement,  by = c("personId"))%>%
+  dplyr::filter(conceptId %in% Measurements)%>%
+  # within the next month and a month prior
+  dplyr::filter(difftime(startDate.y, startDate.x, units = "days") < 31 & difftime(startDate.y, startDate.x, units = "days") > -31)%>%
+  dplyr::inner_join(conceptIds, by = "conceptId")%>%
+  # sort 
+  dplyr:: arrange(difftime(startDate.y, startDate.x, units = "days"))%>%
+  dplyr::mutate(conceptName = paste(conceptName, " (", difftime(startDate.y, startDate.x, units = "days"), " days)", sep = ''))%>%
+  dplyr::select(personId, conceptName)%>% 
+  dplyr::distinct()%>%
+  dplyr::group_by(personId) %>% 
+  dplyr::summarise(measurements = stringr::str_c(conceptName, collapse = ", "))  
+
+
+alternativeDiagnosis = cohort %>%
+  dplyr::inner_join(conditionOccurrence,  by = c("personId"))%>%
+  dplyr::filter(conceptId %in% AlternativeDiagnosis)%>%
+  # within the next month 
+  dplyr::filter(difftime(startDate.y, startDate.x, units = "days") < 31 & difftime(startDate.y, startDate.x, units = "days") > 0)%>%
+  dplyr::inner_join(conceptIds, by = "conceptId")%>%
+  # sort 
+  dplyr:: arrange(difftime(startDate.y, startDate.x, units = "days"))%>%
+  dplyr::mutate(conceptName = paste(conceptName, " (", difftime(startDate.y, startDate.x, units = "days"), " days)", sep = ''))%>%
+  dplyr::select(personId, conceptName)%>% 
+  dplyr::distinct()%>%
+  dplyr::group_by(personId) %>% 
+  dplyr::summarise(alternativeDiagnosis = stringr::str_c(conceptName, collapse = ", "))  
+
+
+treatmentProcedures = cohort %>%
+  dplyr::inner_join(procedureOccurrence,  by = c("personId"))%>%
+  dplyr::filter(conceptId %in% TreatmentProcedures)%>%
+  # within the next month 
+  dplyr::filter(difftime(startDate.y, startDate.x, units = "days") < 31 & difftime(startDate.y, startDate.x, units = "days") > -1)%>%
+  dplyr::inner_join(conceptIds, by = "conceptId")%>%
+  # sort 
+  dplyr:: arrange(difftime(startDate.y, startDate.x, units = "days"))%>%
+  dplyr::mutate(conceptName = paste(conceptName, " (", difftime(startDate.y, startDate.x, units = "days"), " days)", sep = ''))%>%
+  dplyr::select(personId, conceptName)%>% 
+  dplyr::distinct()%>%
+  dplyr::group_by(personId) %>% 
+  dplyr::summarise(treatmentProcedures = stringr::str_c(conceptName, collapse = ", "))  
+
+
+medicationTreatment = cohort %>%
+  dplyr::inner_join(drugEra,  by = c("personId"))%>%
+  dplyr::filter(conceptId %in% MedicationTreatment)%>%
+  # within the next month 
+  dplyr::filter(difftime(startDate.y, startDate.x, units = "days") < 31 & difftime(startDate.y, startDate.x, units = "days") > -1)%>%
+  dplyr::inner_join(conceptIds, by = "conceptId")%>%
+  # sort 
+  dplyr:: arrange(difftime(startDate.y, startDate.x, units = "days"))%>%
+  dplyr::mutate(conceptName = paste(conceptName, " (", difftime(startDate.y, startDate.x, units = "days"), " days, for ", difftime(endDate.y, startDate.y, units = "days") , " days)", sep = ''))%>%
+  dplyr::select(personId, conceptName)%>% 
+  dplyr::distinct()%>%
+  dplyr::group_by(personId) %>% 
+  dplyr::summarise(medicationTreatment = stringr::str_c(conceptName, collapse = ", "))  
+
+
+complications = cohort %>%
+  dplyr::inner_join(conditionOccurrence,  by = c("personId"))%>%
+  dplyr::filter(conceptId %in% Complications)%>%
+  # within the next year 
+  dplyr::filter(difftime(startDate.y, startDate.x, units = "days") < 366 & difftime(startDate.y, startDate.x, units = "days") > 0)%>%
+  dplyr::inner_join(conceptIds, by = "conceptId")%>%
+  # sort 
+  dplyr:: arrange(difftime(startDate.y, startDate.x, units = "days"))%>%
+  dplyr::mutate(conceptName = paste(conceptName, " (", difftime(startDate.y, startDate.x, units = "days"), " days)", sep = ''))%>%
+  dplyr::select(personId, conceptName)%>% 
+  dplyr::distinct()%>%
+  dplyr::group_by(personId) %>% 
+  dplyr::summarise(complications = stringr::str_c(conceptName, collapse = ", "))
+
+  subjects%>%
+  # gender
+  dplyr::left_join(presentation, by = "personId")%>%
+  dplyr::left_join(priorConditions, by = "personId")%>%
+  dplyr::left_join(priorDrugs, by = "personId")%>%
+  dplyr::left_join(diagnosticProcedures, by = "personId")%>%
+  dplyr::left_join(measurements, by = "personId")%>%
+  dplyr::left_join(alternativeDiagnosis, by = "personId")%>%
+  dplyr::left_join(treatmentProcedures, by = "personId")%>%
+  dplyr::left_join(medicationTreatment, by = "personId")%>%
+  dplyr::left_join(complications, by = "personId")%>%
+  dplyr::select(personId, age, gender, presentation, priorConditions, priorDrugs, diagnosticProcedures, measurements,
+         alternativeDiagnosis, treatmentProcedures, medicationTreatment, complications)%>%
+  dplyr::distinct()%>%
+  # add columns for review
+  tibble::add_column(cohort_definition_id = cohortDefinitionId, 
+                     cohort_name = cohortName,
+                     reviewer = NA, 
+                     status = NA, 
+                     index_misspecification = NA, 
+                     notes = NA)
+  
+  KEEPER <- replace(KEEPER, is.na(KEEPER), "")
+  
+  KEEPER%>%
+  write.csv("KEEPER.csv")
 
   results <- list(
     cohort = cohort,
